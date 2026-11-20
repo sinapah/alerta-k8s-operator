@@ -1,0 +1,40 @@
+type: charm
+name: alerta-k8s
+title: Alerta K8s
+summary: Operate Alerta on Juju Kubernetes.
+description: |
+  Alerta K8s operates the Alerta alert consolidation server and web UI on
+  Juju Kubernetes using the Ops framework and sidecar pattern.
+
+  PostgreSQL is not embedded in the Alerta pod and must be supplied through
+  the `database` relation (for example with postgresql-k8s).
+
+base: ubuntu@26.04
+platforms:
+  amd64:
+
+assumes:
+  - juju >= 3.6
+  - k8s-api
+
+parts:
+  charm:
+    plugin: uv
+    source: .
+    build-snaps:
+      - astral-uv
+
+containers:
+  alerta:
+    resource: alerta-image
+
+resources:
+  alerta-image:
+    type: oci-image
+    description: OCI image for the Alerta workload.
+    upstream-source: ghcr.io/sinapah/alerta-rock/alerta:9.1.0-26.04_edge
+
+requires:
+  database:
+    interface: postgresql_client
+    limit: 1
