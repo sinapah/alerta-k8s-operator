@@ -206,3 +206,31 @@ def test_metrics_endpoint_publishes_scrape_job_and_generic_rules(ctx):
         for rule in group["rules"]
     }
     assert {"HostDown", "HostMetricsMissing"} <= alerts
+
+
+def webhook_relation():
+    return testing.Relation(endpoint="alerta-webhook", interface="alerta_webhook")
+
+
+@pytest.mark.parametrize(
+    "leader, extra, expected",
+    [
+        (True, [], {"url": "http://alerta-k8s.test.svc.cluster.local:8080/api"}),
+        (True, [ingress_relation()], {"url": "http://10.0.0.1/test-alerta-k8s/api"}),
+        (False, [], {}),
+    ],
+)
+def test_webhook_url_published_to_alertmanager(leader, extra, expected):
+    ctx = testing.Context(AlertaK8SCharm)
+    webhook = webhook_relation()
+    state = ctx.run(
+        ctx.on.relation_created(webhook),
+        testing.State(
+            leader=leader,
+            model=testing.Model(name="test"),
+            containers=[container()],
+            relations=[webhook, relation(), *extra],
+            secrets=[secret()],
+        ),
+    )
+    assert state.get_relation(webhook.id).local_app_data == expected

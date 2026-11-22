@@ -51,3 +51,8 @@ provides:
     optional: true
     description: |
       Exposes the Alerta metrics endpoint to Prometheus.
+  alerta-webhook:
+    interface: alerta_webhook
+    optional: true
+    description: |
+      Publishes the Alerta API URL so Alertmanager sends its alerts to Alerta.
