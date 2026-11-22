@@ -1,6 +1,8 @@
 # Copyright 2026 sinapah
 # See LICENSE file for licensing details.
 
+import json
+
 import ops
 import pytest
 from ops import testing
@@ -59,6 +61,14 @@ def relation(with_data: bool = True):
     )
 
 
+def ingress_relation():
+    return testing.Relation(
+        endpoint="ingress",
+        interface="ingress",
+        remote_app_data={"ingress": json.dumps({"url": "http://10.0.0.1/test-alerta-k8s"})},
+    )
+
+
 def secret():
     return testing.Secret(tracked_content={"key": "k"}, label="secret-key", owner="app")
 
@@ -101,7 +111,42 @@ def test_active_and_layer_environment(ctx):
     )
     assert state.unit_status == testing.ActiveStatus()
     layer = state.get_container("alerta").layers["alerta"]
-    assert layer.services["uwsgi"].environment == {"DATABASE_URL": EXPECTED_URL, "SECRET_KEY": "k"}
+    assert layer.services["uwsgi"].environment == {
+        "DATABASE_URL": EXPECTED_URL,
+        "SECRET_KEY": "k",
+        "BASE_URL": "",
+    }
+
+
+def test_base_url_from_ingress(ctx):
+    state = ctx.run(
+        ctx.on.update_status(),
+        testing.State(
+            leader=True,
+            containers=[container()],
+            relations=[relation(), ingress_relation()],
+            secrets=[secret()],
+        ),
+    )
+    layer = state.get_container("alerta").layers["alerta"]
+    assert layer.services["uwsgi"].environment["BASE_URL"] == (
+        "http://10.0.0.1/test-alerta-k8s/api"
+    )
+
+
+def test_base_url_cleared_when_ingress_removed(ctx):
+    ingress = ingress_relation()
+    state = ctx.run(
+        ctx.on.relation_broken(ingress),
+        testing.State(
+            leader=True,
+            containers=[container()],
+            relations=[relation(), ingress],
+            secrets=[secret()],
+        ),
+    )
+    layer = state.get_container("alerta").layers["alerta"]
+    assert layer.services["uwsgi"].environment["BASE_URL"] == ""
 
 
 def test_leader_creates_secret_key(ctx):

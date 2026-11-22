@@ -10,12 +10,19 @@ from urllib.parse import quote
 
 import ops
 from charms.data_platform_libs.v0.data_interfaces import DatabaseRequires
+from charms.traefik_k8s.v2.ingress import IngressPerAppRequirer
+
+from nginx_config import NGINX_CONFIG
 
 logger = logging.getLogger(__name__)
 
 CONTAINER_NAME = "alerta"
-SERVICES = ("uwsgi", "nginx")
 UWSGI_SERVICE = "uwsgi"
+NGINX_SERVICE = "nginx"
+SERVICES = (UWSGI_SERVICE, NGINX_SERVICE)
+NGINX_CONFIG_PATH = "/etc/alerta/nginx.conf"
+HTTP_PORT = 8080
+INGRESS_RELATION = "ingress"
 DATABASE_RELATION = "database"
 DATABASE_NAME = "alerta"
 SECRET_KEY_LABEL = "secret-key"
@@ -31,6 +38,9 @@ class AlertaK8SCharm(ops.CharmBase):
         self.database = DatabaseRequires(
             self, relation_name=DATABASE_RELATION, database_name=DATABASE_NAME
         )
+        self.ingress = IngressPerAppRequirer(
+            self, relation_name=INGRESS_RELATION, port=HTTP_PORT, strip_prefix=True
+        )
 
         for event in (
             self.on[CONTAINER_NAME].pebble_ready,
@@ -42,17 +52,24 @@ class AlertaK8SCharm(ops.CharmBase):
             self.database.on.database_created,
             self.database.on.endpoints_changed,
             self.on[DATABASE_RELATION].relation_broken,
+            self.ingress.on.ready,
+            self.ingress.on.revoked,
         ):
             framework.observe(event, self._reconcile)
 
     def _reconcile(self, _: ops.EventBase) -> None:
         """Converge the workload and unit status on the current state."""
+        self.unit.set_ports(HTTP_PORT)
+
         if self.unit.is_leader():
             self._ensure_secret_key()
 
         if not self.container.can_connect():
             self.unit.status = ops.WaitingStatus("waiting for Pebble")
             return
+
+        if self._push_nginx_config():
+            self.container.restart(NGINX_SERVICE)
 
         if not [r for r in self.model.relations[DATABASE_RELATION] if r.active]:
             self.unit.status = ops.BlockedStatus("missing relation: database")
@@ -73,7 +90,11 @@ class AlertaK8SCharm(ops.CharmBase):
             "services": {
                 UWSGI_SERVICE: {
                     "override": "merge",
-                    "environment": {"DATABASE_URL": url, "SECRET_KEY": key},
+                    "environment": {
+                        "DATABASE_URL": url,
+                        "SECRET_KEY": key,
+                        "BASE_URL": self._api_base_url(),
+                    },
                 }
             },
         }
@@ -84,6 +105,24 @@ class AlertaK8SCharm(ops.CharmBase):
             self.unit.status = ops.ActiveStatus()
         else:
             self.unit.status = ops.WaitingStatus("waiting for Alerta to be ready")
+
+    def _push_nginx_config(self) -> bool:
+        """Write the nginx config into the workload; return whether it changed."""
+        try:
+            with self.container.pull(NGINX_CONFIG_PATH) as current:
+                if current.read() == NGINX_CONFIG:
+                    return False
+        except ops.pebble.PathError:
+            pass
+        self.container.push(NGINX_CONFIG_PATH, NGINX_CONFIG, make_dirs=True, permissions=0o644)
+        return True
+
+    def _api_base_url(self) -> str:
+        """Return the external API base URL for Alerta, or "" without ingress."""
+        if not any(r.active for r in self.model.relations[INGRESS_RELATION]):
+            return ""
+        url = self.ingress.url
+        return f"{url.rstrip('/')}/api" if url else ""
 
     def _workload_ready(self) -> bool:
         """Return whether all Alerta services run and the ready checks are up."""
