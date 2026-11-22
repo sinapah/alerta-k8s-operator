@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+# Copyright 2026 sinapah
+# See LICENSE file for licensing details.
+
+"""Charm the Alerta alert consolidation server."""
+
+import logging
+import secrets
+from urllib.parse import quote
+
+import ops
+from charms.data_platform_libs.v0.data_interfaces import DatabaseRequires
+
+logger = logging.getLogger(__name__)
+
+CONTAINER_NAME = "alerta"
+SERVICES = ("uwsgi", "nginx")
+UWSGI_SERVICE = "uwsgi"
+DATABASE_RELATION = "database"
+DATABASE_NAME = "alerta"
+SECRET_KEY_LABEL = "secret-key"
+LAYER_NAME = "alerta"
+
+
+class AlertaK8SCharm(ops.CharmBase):
+    """Charm the Alerta workload."""
+
+    def __init__(self, framework: ops.Framework):
+        super().__init__(framework)
+        self.container = self.unit.get_container(CONTAINER_NAME)
+        self.database = DatabaseRequires(
+            self, relation_name=DATABASE_RELATION, database_name=DATABASE_NAME
+        )
+
+        for event in (
+            self.on[CONTAINER_NAME].pebble_ready,
+            self.on[CONTAINER_NAME].pebble_check_failed,
+            self.on[CONTAINER_NAME].pebble_check_recovered,
+            self.on.update_status,
+            self.on.leader_elected,
+            self.on.secret_changed,
+            self.database.on.database_created,
+            self.database.on.endpoints_changed,
+            self.on[DATABASE_RELATION].relation_broken,
+        ):
+            framework.observe(event, self._reconcile)
+
+    def _reconcile(self, _: ops.EventBase) -> None:
+        """Converge the workload and unit status on the current state."""
+        if self.unit.is_leader():
+            self._ensure_secret_key()
+
+        if not self.container.can_connect():
+            self.unit.status = ops.WaitingStatus("waiting for Pebble")
+            return
+
+        if not [r for r in self.model.relations[DATABASE_RELATION] if r.active]:
+            self.unit.status = ops.BlockedStatus("missing relation: database")
+            return
+
+        url = self._database_url()
+        if url is None:
+            self.unit.status = ops.WaitingStatus("waiting for database credentials")
+            return
+
+        key = self._secret_key()
+        if key is None:
+            self.unit.status = ops.WaitingStatus("waiting for secret key")
+            return
+
+        layer: ops.pebble.LayerDict = {
+            "summary": "Alerta layer",
+            "services": {
+                UWSGI_SERVICE: {
+                    "override": "merge",
+                    "environment": {"DATABASE_URL": url, "SECRET_KEY": key},
+                }
+            },
+        }
+        self.container.add_layer(LAYER_NAME, layer, combine=True)
+        self.container.replan()
+
+        if self._workload_ready():
+            self.unit.status = ops.ActiveStatus()
+        else:
+            self.unit.status = ops.WaitingStatus("waiting for Alerta to be ready")
+
+    def _workload_ready(self) -> bool:
+        """Return whether all Alerta services run and the ready checks are up."""
+        services = self.container.get_services(*SERVICES)
+        if len(services) != len(SERVICES) or not all(s.is_running() for s in services.values()):
+            return False
+        checks = self.container.get_checks(level=ops.pebble.CheckLevel.READY)
+        return all(c.status == ops.pebble.CheckStatus.UP for c in checks.values())
+
+    def _database_url(self) -> str | None:
+        """Build the PostgreSQL URL from the relation data, or None if not yet available."""
+        data = self.database.fetch_relation_data(fields=["endpoints", "username", "password"])
+        if not data:
+            return None
+        fields = next(iter(data.values()))
+        endpoints = fields.get("endpoints")
+        username = fields.get("username")
+        password = fields.get("password")
+        if not (endpoints and username and password):
+            return None
+        endpoint = endpoints.split(",")[0]
+        return (
+            f"postgresql://{quote(username, safe='')}:{quote(password, safe='')}"
+            f"@{endpoint}/{DATABASE_NAME}"
+        )
+
+    def _ensure_secret_key(self) -> None:
+        """Create the application secret holding Alerta's SECRET_KEY if missing."""
+        try:
+            self.model.get_secret(label=SECRET_KEY_LABEL)
+        except ops.SecretNotFoundError:
+            self.app.add_secret({"key": secrets.token_urlsafe(32)}, label=SECRET_KEY_LABEL)
+
+    def _secret_key(self) -> str | None:
+        """Return Alerta's SECRET_KEY, or None if the leader has not created it yet."""
+        try:
+            return self.model.get_secret(label=SECRET_KEY_LABEL).peek_content()["key"]
+        except ops.SecretNotFoundError:
+            return None
+
+
+if __name__ == "__main__":  # pragma: nocover
+    ops.main(AlertaK8SCharm)
