@@ -9,6 +9,7 @@ import secrets
 from urllib.parse import quote
 
 import ops
+from charms.alerta_k8s.v0.alerta_webhook import AlertaProvider
 from charms.data_platform_libs.v0.data_interfaces import DatabaseRequires
 from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
 from charms.traefik_k8s.v2.ingress import IngressPerAppRequirer
@@ -26,6 +27,7 @@ HTTP_PORT = 8080
 INGRESS_RELATION = "ingress"
 DATABASE_RELATION = "database"
 METRICS_RELATION = "metrics-endpoint"
+WEBHOOK_RELATION = "alerta-webhook"
 METRICS_PATH = "/api/management/metrics"
 METRICS_JOB = "alerta"
 DATABASE_NAME = "alerta"
@@ -56,12 +58,14 @@ class AlertaK8SCharm(ops.CharmBase):
                 }
             ],
         )
+        self.alertmanagers = AlertaProvider(self, relation_name=WEBHOOK_RELATION)
 
         for event in (
             self.on[CONTAINER_NAME].pebble_ready,
             self.on[CONTAINER_NAME].pebble_check_failed,
             self.on[CONTAINER_NAME].pebble_check_recovered,
             self.on.update_status,
+            self.on[WEBHOOK_RELATION].relation_created,
             self.on.leader_elected,
             self.on.secret_changed,
             self.database.on.database_created,
@@ -75,6 +79,7 @@ class AlertaK8SCharm(ops.CharmBase):
     def _reconcile(self, _: ops.EventBase) -> None:
         """Converge the workload and unit status on the current state."""
         self.unit.set_ports(HTTP_PORT)
+        self.alertmanagers.publish(self._webhook_api_url())
 
         if self.unit.is_leader():
             self._ensure_secret_key()
@@ -131,6 +136,13 @@ class AlertaK8SCharm(ops.CharmBase):
             pass
         self.container.push(NGINX_CONFIG_PATH, NGINX_CONFIG, make_dirs=True, permissions=0o644)
         return True
+
+    def _webhook_api_url(self) -> str:
+        """Return the Alerta API URL advertised to Alertmanager."""
+        return (
+            self._api_base_url()
+            or f"http://{self.app.name}.{self.model.name}.svc.cluster.local:{HTTP_PORT}/api"
+        )
 
     def _api_base_url(self) -> str:
         """Return the external API base URL for Alerta, or "" without ingress."""
