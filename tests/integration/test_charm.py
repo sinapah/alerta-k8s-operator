@@ -134,3 +134,32 @@ def test_ingress(juju: jubilant.Juju):
         "endpoint": "/api",
         "base_path": "/",
     }
+
+
+def test_metrics_endpoint(juju: jubilant.Juju):
+    """Relate to Prometheus and check the Alerta metrics target is scraped and healthy."""
+    address = juju.status().apps["alerta"].units["alerta/0"].address
+    assert "alerta_uptime_msecs" in _get(f"http://{address}:8080/api/management/metrics")
+
+    juju.deploy("prometheus-k8s", app="prometheus", channel="1/stable", trust=True)
+    juju.integrate("alerta:metrics-endpoint", "prometheus:metrics-endpoint")
+    juju.wait(lambda status: jubilant.all_active(status, "prometheus", "alerta"), timeout=900)
+
+    prometheus = juju.status().apps["prometheus"].units["prometheus/0"].address
+    deadline = time.monotonic() + 300
+    while True:
+        targets = json.loads(_get(f"http://{prometheus}:9090/api/v1/targets"))["data"]
+        up = [
+            t
+            for t in targets["activeTargets"]
+            if t["labels"].get("juju_application") == "alerta" and t["health"] == "up"
+        ]
+        if up:
+            break
+        assert time.monotonic() < deadline, f"alerta target never became up: {targets}"
+        time.sleep(5)
+    assert up[0]["scrapeUrl"].endswith(":8080/api/management/metrics")
+
+    rules = json.loads(_get(f"http://{prometheus}:9090/api/v1/rules"))["data"]["groups"]
+    names = {rule["name"] for group in rules for rule in group["rules"]}
+    assert "HostDown" in names

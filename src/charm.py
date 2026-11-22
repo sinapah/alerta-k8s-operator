@@ -10,6 +10,7 @@ from urllib.parse import quote
 
 import ops
 from charms.data_platform_libs.v0.data_interfaces import DatabaseRequires
+from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
 from charms.traefik_k8s.v2.ingress import IngressPerAppRequirer
 
 from nginx_config import NGINX_CONFIG
@@ -24,6 +25,9 @@ NGINX_CONFIG_PATH = "/etc/alerta/nginx.conf"
 HTTP_PORT = 8080
 INGRESS_RELATION = "ingress"
 DATABASE_RELATION = "database"
+METRICS_RELATION = "metrics-endpoint"
+METRICS_PATH = "/api/management/metrics"
+METRICS_JOB = "alerta"
 DATABASE_NAME = "alerta"
 SECRET_KEY_LABEL = "secret-key"
 LAYER_NAME = "alerta"
@@ -40,6 +44,17 @@ class AlertaK8SCharm(ops.CharmBase):
         )
         self.ingress = IngressPerAppRequirer(
             self, relation_name=INGRESS_RELATION, port=HTTP_PORT, strip_prefix=True
+        )
+        self.metrics_endpoint = MetricsEndpointProvider(
+            self,
+            relation_name=METRICS_RELATION,
+            jobs=[
+                {
+                    "job_name": METRICS_JOB,
+                    "metrics_path": METRICS_PATH,
+                    "static_configs": [{"targets": [f"*:{HTTP_PORT}"]}],
+                }
+            ],
         )
 
         for event in (
