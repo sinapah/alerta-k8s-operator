@@ -44,3 +44,10 @@ requires:
     limit: 1
     description: |
       Alerta needs a "per app" ingress with path routing, available in the traefik-k8s charm.
+
+provides:
+  metrics-endpoint:
+    interface: prometheus_scrape
+    optional: true
+    description: |
+      Exposes the Alerta metrics endpoint to Prometheus.

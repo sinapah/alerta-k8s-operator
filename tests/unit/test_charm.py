@@ -179,3 +179,30 @@ def test_waiting_when_ready_check_down(ctx):
         ),
     )
     assert state.unit_status == testing.WaitingStatus("waiting for Alerta to be ready")
+
+
+def test_metrics_endpoint_publishes_scrape_job_and_generic_rules(ctx):
+    metrics = testing.Relation(endpoint="metrics-endpoint", interface="prometheus_scrape")
+    state = ctx.run(
+        ctx.on.relation_joined(metrics, remote_unit=0),
+        testing.State(
+            leader=True,
+            containers=[container()],
+            relations=[relation(), metrics],
+            secrets=[secret()],
+        ),
+    )
+    data = state.get_relation(metrics.id).local_app_data
+    assert json.loads(data["scrape_jobs"]) == [
+        {
+            "job_name": "alerta",
+            "metrics_path": "/api/management/metrics",
+            "static_configs": [{"targets": ["*:8080"]}],
+        }
+    ]
+    alerts = {
+        rule["alert"]
+        for group in json.loads(data["alert_rules"])["groups"]
+        for rule in group["rules"]
+    }
+    assert {"HostDown", "HostMetricsMissing"} <= alerts
