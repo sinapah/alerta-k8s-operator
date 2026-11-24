@@ -77,9 +77,22 @@ jobs:
       - name: Run unit tests
         run: uvx tox -e unit
 
+  webhook-package:
+    name: alerta_webhook package
+    needs: [ci-ignore]
+    if: needs.ci-ignore.outputs.any_modified == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: alerta_webhook
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v5
+      - run: uvx tox -e lint,static,unit
+
   pack:
     name: Pack charm
-    needs: [lint, static, unit]
+    needs: [lint, static, unit, webhook-package]
     if: needs.ci-ignore.outputs.any_modified == 'true'
     runs-on: ubuntu-latest
     outputs:
