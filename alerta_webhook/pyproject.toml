@@ -1,0 +1,70 @@
+# Copyright 2026 sinapah
+# See LICENSE file for licensing details.
+
+[project]
+name = "alerta-webhook"
+version = "0.1.0"
+description = "Charm library for the alerta_webhook relation interface (Alertmanager to Alerta)."
+requires-python = ">=3.10"
+classifiers = ["Development Status :: 3 - Alpha"]
+dependencies = [
+    "ops~=3.8",
+    "pydantic>=2,<3",
+]
+
+[build-system]
+requires = ["uv_build>=0.12,<0.13"]
+build-backend = "uv_build"
+
+[dependency-groups]
+lint = [
+    "ruff~=0.16",
+    "codespell>=2.4,<3",
+    "pyright>=1.1,<2",
+]
+unit = [
+    "coverage[toml]>=7.15,<8",
+    "ops[testing]",
+    "pytest>=9.1,<10",
+]
+
+[tool.coverage.run]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+log_cli_format = "%(levelname)s %(name)s %(message)s"
+filterwarnings = ["error"]
+
+[tool.codespell]
+skip = "build,dist,venv,.venv,.tox,.git,.ruff_cache,.coverage"
+
+[tool.pyright]
+include = ["src", "tests"]
+
+[tool.ruff]
+line-length = 99
+lint.select = ["E", "W", "F", "C", "N", "D", "I001"]
+lint.ignore = [
+    "D105",
+    "D107",
+    "D203",
+    "D204",
+    "D213",
+    "D215",
+    "D400",
+    "D404",
+    "D406",
+    "D407",
+    "D408",
+    "D409",
+    "D413",
+]
+lint.per-file-ignores = {"tests/*" = ["D100","D101","D102","D103","D104"]}
+extend-exclude = ["__pycache__", "*.egg_info"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
