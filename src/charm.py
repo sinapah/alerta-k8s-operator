@@ -9,7 +9,7 @@ import secrets
 from urllib.parse import quote
 
 import ops
-from charms.alerta_k8s.v0.alerta_webhook import AlertaProvider
+from alerta_webhook import AlertaProvider
 from charms.data_platform_libs.v0.data_interfaces import DatabaseRequires
 from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
 from charms.traefik_k8s.v2.ingress import IngressPerAppRequirer

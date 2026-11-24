@@ -13,6 +13,7 @@ requires-python = ">=3.10"
 # 'charm-libs' block in charmcraft.yaml, run `charmcraft fetch-libs` to download the libraries,
 # then inspect the libraries for dependencies specified in PYDEPS. List those dependencies here.
 dependencies = [
+    "alerta-webhook",
     "cosl>=0.0.53",
     "ops~=3.8",
     "pydantic>=2,<3",
@@ -58,6 +59,7 @@ filterwarnings = [
 # Linting tools configuration
 [tool.ruff]
 line-length = 99
+src = ["src"]
 lint.select = ["E", "W", "F", "C", "N", "D", "I001"]
 lint.ignore = [
     "D105",
@@ -85,3 +87,6 @@ skip = "build,lib,venv,icon.svg,.tox,.git,.mypy_cache,.ruff_cache,.coverage"
 
 [tool.pyright]
 include = ["src", "tests"]
+
+[tool.uv.sources]
+alerta-webhook = { git = "https://github.com/sinapah/alerta-k8s-operator", subdirectory = "alerta_webhook" }

@@ -21,6 +21,8 @@ parts:
   charm:
     plugin: uv
     source: .
+    build-packages:
+      - git
     build-snaps:
       - astral-uv
 
