@@ -73,7 +73,7 @@ def _get(url: str) -> str:
 
 def test_ingress(juju: jubilant.Juju):
     """Relate to Traefik and check the UI, config.json and API links carry the path prefix."""
-    juju.deploy("traefik-k8s", app="traefik", channel="latest/stable", trust=True)
+    juju.deploy("traefik-k8s", app="traefik", channel="latest/edge", trust=True)
     juju.integrate("alerta:ingress", "traefik:ingress")
     juju.wait(lambda status: jubilant.all_active(status, "traefik", "alerta"), timeout=900)
 
